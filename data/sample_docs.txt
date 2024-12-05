@@ -1,0 +1,2 @@
+Object-Oriented Programming (OOP) is a paradigm based on the concept of objects. 
+A class is a blueprint for objects. Inheritance allows a class to inherit properties.
