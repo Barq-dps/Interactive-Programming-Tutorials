@@ -1,45 +1,74 @@
-import spacy
+import fitz  # PyMuPDF
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 import re
-# Load the spaCy model
-nlp = spacy.load("en_core_web_sm")
+
+# Hugging Face API key (hidden for security)
+hf_api_key = "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"
+
+# Model name
+model_name = "Qwen/Qwen2.5-Coder-1.5B-Instruct"
 
 
-def load_text_file(file_name):
-    """Load content from a text file."""
-    file_path = "data/sample_docs.txt"  # Combine the base directory and file name
+# Load tokenizer and model from Hugging Face with API key
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_auth_token=hf_api_key)
+model = AutoModelForCausalLM.from_pretrained(model_name, use_auth_token=hf_api_key)
+
+# Create a text generation pipeline
+llama_pipeline = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer
+)
+
+# Step 1: Extract Text from PDF
+def extract_text_from_pdf(pdf_path):
+    text = ""
     try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return file.read()
-    except FileNotFoundError:
-        print(f"Error: File not found at {file_path}")
+        doc = fitz.open(pdf_path)
+        for page in doc:
+            text += page.get_text("text")
+        return text
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error extracting text from PDF: {e}")
+        return None
 
 
-def tokenize_sentences(text):
-    """Tokenize text into sentences using spaCy."""
-    doc = nlp(text)
-    return [sent.text for sent in doc.sents]
+# Step 2: Extract Topics and Generate Coding Questions
+def generate_questions_from_text(text):
+    topics = re.findall(r'Chapter\s\d+:\s([A-Za-z\s]+[A-Za-z])', text)
+    
+    questions = [f"Write a Python function to implement {topic}." for topic in topics]
+    return questions
 
 
-def extract_code_snippets(text):
-    """Extract code snippets from text using regex."""
-    code_snippets = re.findall(r"(?:^|\n)(?: {4}|\t|def |class |\w+\s?=\s?|print\().+?\n", text)
-    return [snippet.strip() for snippet in code_snippets]
+def evaluate_user_code_with_llama(user_code, question):
+    """Evaluate user code using Qwen2.5 1.5B and provide feedback."""
+    prompt = f"Evaluate the following Python code to solve the task:\nTask: {question}\nCode:\n{user_code}\nProvide feedback if the solution is correct or not."
+    
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    
+    output = model.generate(**inputs, max_new_tokens=300)
+    response = tokenizer.decode(output[0], skip_special_tokens=True)
+    
+    return response.strip()
 
 
-# Test the script
+# Main Program
 if __name__ == "__main__":
-    file_path = "sample_docs.txt"  # Replace with your file path
-    text = load_text_file(file_path)
+    pdf_path = "data/sample_docs.pdf"  # Path to PDF
+    extracted_text = extract_text_from_pdf(pdf_path)
 
-    if text:
-        print("\nSentences:")
-        sentences = tokenize_sentences(text)
-        for i, sent in enumerate(sentences, 1):
-            print(f"{i}. {sent}")
-
-        print("\nCode Snippets:")
-        code_snippets = extract_code_snippets(text)
-        for snippet in code_snippets:
-            print(snippet)
+    if extracted_text:
+        # Generate questions from extracted topics
+        questions = generate_questions_from_text(extracted_text)
+        
+        # Ask user to answer questions
+        for question in questions:
+            print(f"\n{question}")
+            user_code = input("Write your code here:\n")
+            
+            # Evaluate the user's code
+            feedback = evaluate_user_code_with_llama(user_code, question)
+            print(f"\nFeedback:\n{feedback}")
+    else:
+        print("Failed to extract text or PDF is empty.")
